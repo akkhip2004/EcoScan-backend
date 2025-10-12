@@ -13,20 +13,20 @@ import uvicorn
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ✅ Updated ML service endpoint (your deployed model on Render)
+# ML service URL
 ML_SERVICE_URL = "https://ecoscan1.onrender.com/classify_image"
 
-# ✅ Partner mapping – keeps same details
+# Partner mapping
 PARTNER_MAP = {
-    "cardboard":    {"name": "Local Paper Recycler", "contact": "paper@example.org"},
-    "glass":        {"name": "GlassWorks", "contact": "glass@example.org"},
-    "metal":        {"name": "Metal Recyclers", "contact": "metal@example.org"},
-    "plastic":      {"name": "Plastic Upcycle", "contact": "plastic@example.org"},
-    "paper":        {"name": "PaperCycle", "contact": "paper@example.org"},
-    "trash":        {"name": "Municipal Waste", "contact": "waste@example.org"},
+    "cardboard":     {"name": "Local Paper Recycler", "contact": "paper@example.org"},
+    "glass":         {"name": "GlassWorks", "contact": "glass@example.org"},
+    "metal":         {"name": "Metal Recyclers", "contact": "metal@example.org"},
+    "plastic":       {"name": "Plastic Upcycle", "contact": "plastic@example.org"},
+    "paper":         {"name": "PaperCycle", "contact": "paper@example.org"},
+    "trash":         {"name": "Municipal Waste", "contact": "waste@example.org"},
     "biodegradable": {"name": "Hasiru Dala", "contact": "hasiru@example.org"},
-    "recyclable":   {"name": "TerraCycle",  "contact": "terracycle@example.org"},
-    "hazardous":    {"name": "Attero Recycling", "contact": "attero@example.org"}
+    "recyclable":    {"name": "TerraCycle",  "contact": "terracycle@example.org"},
+    "hazardous":     {"name": "Attero Recycling", "contact": "attero@example.org"}
 }
 
 # -------------------------------
@@ -44,11 +44,10 @@ app.add_middleware(
 @app.post("/api/upload")
 async def upload_image(file: UploadFile = File(...)):
     """
-    Receive an uploaded image, save it, send it to the ML microservice,
-    and return the prediction along with the mapped partner.
+    Fully async endpoint: save uploaded image, send to ML service, return prediction + partner.
     """
     try:
-        # 1. Save uploaded image
+        # 1️⃣ Save uploaded image asynchronously
         ext = os.path.splitext(file.filename)[1] or ".jpg"
         filename = f"{uuid.uuid4()}{ext}"
         file_path = os.path.join(UPLOAD_DIR, filename)
@@ -57,23 +56,26 @@ async def upload_image(file: UploadFile = File(...)):
             content = await file.read()
             await out_file.write(content)
 
-        # 2. Send to ML microservice
-        async with httpx.AsyncClient() as client:
-            with open(file_path, "rb") as img:
-                files = {"file": (filename, img, "image/jpeg")}
+        # 2️⃣ Read file asynchronously and send to ML microservice
+        async with aiofiles.open(file_path, "rb") as img:
+            content = await img.read()
+            files = {"file": (filename, content, file.content_type)}
+
+            async with httpx.AsyncClient() as client:
                 response = await client.post(ML_SERVICE_URL, files=files)
 
         if response.status_code != 200:
-            raise HTTPException(status_code=500, detail="ML service failed")
+            raise HTTPException(status_code=500, detail=f"ML service failed: {response.text}")
 
-        # Parse the ML service response
+        # 3️⃣ Parse ML service response
         ml_result = response.json()
         predicted_class = ml_result["prediction"]
         confidence = ml_result["probabilities"][predicted_class]
 
-        # 3. Map to partner
+        # 4️⃣ Map to partner
         partner = PARTNER_MAP.get(predicted_class, {"name": "Unknown", "contact": "N/A"})
 
+        # 5️⃣ Return result
         return {
             "filename": filename,
             "predicted_class": predicted_class,
